@@ -1,0 +1,67 @@
+name: Release preview
+
+# Keeps the description of the open dev -> main pull request up to date with the next version
+# and the notes that merging it would release. The PR is the "unreleased" view.
+# The PR itself is opened manually (title e.g. "chore(release): next release").
+on:
+    push:
+        branches: [dev]
+    pull_request:
+        branches: [main]
+        types: [opened, reopened, labeled, unlabeled]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pull-requests: write
+
+concurrency:
+    group: release-preview
+    cancel-in-progress: true
+
+jobs:
+    preview:
+        runs-on: ubuntu-latest
+        # for pull_request events only handle the dev -> main PR of this repository
+        if: github.event_name != 'pull_request' || (github.head_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: dev
+                  fetch-depth: 0
+
+            - uses: actions/setup-node@v7
+              with:
+                  node-version-file: .nvmrc
+
+            - name: Find the release PR
+              id: pr
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  NUMBER=$(gh pr list --head dev --base main --state open --json number --jq '.[0].number // empty')
+                  if [ -n "$NUMBER" ]; then
+                    echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+                    RELEASE_AS=$(gh pr view "$NUMBER" --json labels \
+                      --jq '[.labels[].name | select(startswith("release-as:"))][0] // "" | ltrimstr("release-as:")')
+                    echo "release_as=$RELEASE_AS" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Compute version and notes
+              if: steps.pr.outputs.number
+              env:
+                  RELEASE_AS: ${{ steps.pr.outputs.release_as }}
+              run: node scripts/release.mjs --ref origin/dev --preview --release-as "$RELEASE_AS" --notes-file preview.md
+
+            - name: Update PR description
+              if: steps.pr.outputs.number
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  {
+                    cat preview.md
+                    echo
+                    echo "---"
+                    echo "_Generated from the PR titles on dev. Add a \`release-as:X.Y.Z\` label to override the version (e.g. \`release-as:1.0.0\`)._"
+                  } > body.md
+                  gh pr edit "${{ steps.pr.outputs.number }}" --body-file body.md
