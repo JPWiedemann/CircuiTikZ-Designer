@@ -1,8 +1,14 @@
 name: Release preview
 
-# Keeps the description of the open dev -> main pull request up to date with the next version
-# and the notes that merging it would release. The PR is the "unreleased" view.
-# The PR itself is opened manually (title e.g. "chore(release): next release").
+# Maintains the dev -> main release pull request:
+#  - opens it as a draft as soon as dev contains something releasable (feat/fix/perf/breaking)
+#  - keeps its description up to date with the next version and the notes merging it would release
+# The PR is the "unreleased" view. Mark it ready for review and merge it (merge commit) to release.
+#
+# PRs opened with the default GITHUB_TOKEN don't trigger the pull_request workflows (pr-title,
+# source-branch), so they could never be merged. Add a repository secret RELEASE_BOT_TOKEN
+# (fine-grained PAT or GitHub App token with "Pull requests: write") to avoid that. Without it
+# the PR is still opened, but it has to be closed and reopened once to run the required checks.
 on:
     push:
         branches: [dev]
@@ -18,6 +24,9 @@ permissions:
 concurrency:
     group: release-preview
     cancel-in-progress: true
+
+env:
+    GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
 jobs:
     preview:
@@ -36,27 +45,23 @@ jobs:
 
             - name: Find the release PR
               id: pr
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   NUMBER=$(gh pr list --head dev --base main --state open --json number --jq '.[0].number // empty')
+                  RELEASE_AS=""
                   if [ -n "$NUMBER" ]; then
                     echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
                     RELEASE_AS=$(gh pr view "$NUMBER" --json labels \
                       --jq '[.labels[].name | select(startswith("release-as:"))][0] // "" | ltrimstr("release-as:")')
-                    echo "release_as=$RELEASE_AS" >> "$GITHUB_OUTPUT"
                   fi
+                  echo "release_as=$RELEASE_AS" >> "$GITHUB_OUTPUT"
 
             - name: Compute version and notes
-              if: steps.pr.outputs.number
+              id: release
               env:
                   RELEASE_AS: ${{ steps.pr.outputs.release_as }}
               run: node scripts/release.mjs --ref origin/dev --preview --release-as "$RELEASE_AS" --notes-file preview.md
 
-            - name: Update PR description
-              if: steps.pr.outputs.number
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            - name: Write PR description
               run: |
                   {
                     cat preview.md
@@ -64,4 +69,13 @@ jobs:
                     echo "---"
                     echo "_Generated from the PR titles on dev. Add a \`release-as:X.Y.Z\` label to override the version (e.g. \`release-as:1.0.0\`)._"
                   } > body.md
-                  gh pr edit "${{ steps.pr.outputs.number }}" --body-file body.md
+
+            - name: Update PR description
+              if: steps.pr.outputs.number
+              run: gh pr edit "${{ steps.pr.outputs.number }}" --body-file body.md
+
+            - name: Open release PR
+              if: steps.pr.outputs.number == '' && steps.release.outputs.release == 'true'
+              run: |
+                  gh pr create --draft --base main --head dev \
+                    --title "chore(release): next release" --body-file body.md
