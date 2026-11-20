@@ -5,12 +5,6 @@
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-
-- Component labels sometimes rendering in the wrong position in Firefox after undo/redo or loading a save file, until the component was clicked
-
 ## [0.8.2]
 
 ### Changed
