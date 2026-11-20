@@ -6,3 +6,6 @@ import { MainController } from "./internal"
 
 // @ts-ignore
 window.mainController = MainController.instance
+
+// CI test: intentional type error
+export const ciTypeError: number = "not a number"
