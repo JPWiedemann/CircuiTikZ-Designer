@@ -7,7 +7,7 @@
 // Prints a JSON summary. If GITHUB_OUTPUT is set, also writes release/version/tag/bump to it.
 //
 // Version rules:
-//   0.x:   breaking -> minor, feat/fix/perf -> patch
+//   0.x:   breaking/feat -> minor, fix/perf -> patch
 //   >=1.0: breaking -> major, feat -> minor, fix/perf -> patch
 // Commits of other types (chore, ci, docs, refactor, test, ...) are not part of the notes and
 // do not trigger a release. --release-as overrides the computed version (e.g. to go to 1.0.0).
@@ -55,7 +55,7 @@ function isGreater(a, b) {
 export function bumpLevel(baseVersion, commits) {
 	const pre1 = parseVersion(baseVersion)[0] === 0
 	if (commits.some((c) => c.breaking)) return pre1 ? "minor" : "major"
-	if (commits.some((c) => c.type === "feat")) return pre1 ? "patch" : "minor"
+	if (commits.some((c) => c.type === "feat")) return "minor"
 	if (commits.some((c) => c.type === "fix" || c.type === "perf")) return "patch"
 	return null
 }
@@ -74,7 +74,9 @@ export function renderNotes(commits) {
 		if (!items.length) continue
 		lines.push(`### ${title}`, "")
 		for (const c of items) {
-			lines.push(`- ${c.scope ? `**${c.scope}:** ` : ""}${c.description}${c.pr ? ` (#${c.pr})` : ""}`)
+			// breaking entries only appear in their own section, so they carry their type
+			const label = key === "breaking" ? `${c.type}${c.scope ? `(${c.scope})` : ""}` : c.scope
+			lines.push(`- ${label ? `**${label}:** ` : ""}${c.description}${c.pr ? ` (#${c.pr})` : ""}`)
 		}
 		lines.push("")
 	}
